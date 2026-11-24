@@ -165,21 +165,19 @@ def _backup_locked(stick: config.Stick, notifier: Notifier, quiet_seconds: int |
             if event.get("message_type") != "status":
                 return
             percent = int(event.get("percent_done", 0) * 100)
-            remaining = event.get("seconds_remaining")
+            # restic's seconds_remaining is deliberately not shown: it was off by a factor of two in practice
             config.write_progress(
                 stick.uuid,
                 {
                     "phase": "copying",
                     "percent": percent,
-                    "seconds_remaining": remaining,
                     "bytes_done": event.get("bytes_done"),
                     "total_bytes": event.get("total_bytes"),
                 },
             )
             shown = steps.due(percent)
             if shown is not None:
-                left = f"about {human_duration(remaining)} left" if remaining else "still working"
-                notifier.send(f"backup {shown}% done", f"{left}. Do not unplug the stick.")
+                notifier.send(f"backup {shown}% done", "Do not unplug the stick.")
 
         summary, unreadable = repository.backup(
             stick.expanded_sources(), stick.expanded_excludes(), stick.exclude_caches, on_event

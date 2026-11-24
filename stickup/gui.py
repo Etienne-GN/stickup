@@ -245,11 +245,7 @@ class StickPage(Adw.Bin):
         if running:
             percent = progress.get("percent", 0)
             self.progress.set_fraction(percent / 100)
-            remaining = progress.get("seconds_remaining")
-            detail = f"{progress.get('phase', 'starting').capitalize()}  ·  {percent}%"
-            if remaining:
-                detail += f"  ·  about {backup.human_duration(remaining)} left"
-            self.progress_label.set_label(detail)
+            self.progress_label.set_label(f"{progress.get('phase', 'starting').capitalize()}  ·  {percent}%")
 
         self.backup_button.set_sensitive(bool(filesystem) and not running)
         self.restore_button.set_sensitive(bool(filesystem) and not running)
