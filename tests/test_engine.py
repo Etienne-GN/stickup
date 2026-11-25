@@ -203,6 +203,34 @@ class EngineTest(unittest.TestCase):
         self.assertEqual(result["status"], "ok")
         self.assertFalse(result["unmounted"])
 
+    def test_enrolling_a_stick_that_already_holds_a_backup_continues_it(self):
+        backup.run_backup(self.stick, notifications=False)
+        newcomer = config.Stick(uuid=UUID, name="TEST", package_lists=False)
+        self.assertTrue(backup.enroll(newcomer, None))
+        self.assertEqual(newcomer.sources, [str(self.source)])
+        self.assertEqual(newcomer.excludes, [str(self.source / "skip")])
+
+    def test_wrong_passphrase_at_enrollment_is_not_left_in_the_keyring(self):
+        with mock.patch.object(devices, "password_command", return_value="echo wrong"), \
+                mock.patch.object(devices, "store_passphrase") as store, \
+                mock.patch.object(devices, "clear_passphrase") as clear:
+            with self.assertRaisesRegex(Exception, "does not open it"):
+                backup.enroll(config.Stick(uuid=UUID, name="TEST"), "wrong")
+        store.assert_called_once()
+        clear.assert_called_once_with(UUID)
+
+    def test_config_edited_elsewhere_is_noticed(self):
+        configuration = config.Config()
+        configuration.sticks[UUID] = self.stick
+        configuration.save()
+        self.assertFalse(configuration.changed_on_disk())
+        other = config.Config()
+        other.sticks[UUID].keep_last = 3
+        other.save()
+        self.assertTrue(configuration.changed_on_disk())
+        configuration.load()
+        self.assertEqual(configuration.get(UUID).keep_last, 3)
+
     def test_retention_keeps_only_the_newest(self):
         for round_number in range(3):
             (self.source / "keep" / "note.txt").write_text(f"round {round_number}")

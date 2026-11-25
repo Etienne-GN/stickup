@@ -373,9 +373,9 @@ class AddDialog(Adw.Dialog):
         passphrase = self.first.get_text()
         self.add_button.set_sensitive(False)
         self.add_button.set_label("Preparing the stick…")
-        in_thread(lambda: backup.enroll(stick, passphrase), lambda _result, error: self.enrolled(stick, error))
+        in_thread(lambda: backup.enroll(stick, passphrase), lambda existing, error: self.enrolled(stick, existing, error))
 
-    def enrolled(self, stick: config.Stick, error) -> None:
+    def enrolled(self, stick: config.Stick, existing: bool, error) -> None:
         if error:
             self.status.set_label(describe(error))
             self.status.set_visible(True)
@@ -386,7 +386,10 @@ class AddDialog(Adw.Dialog):
         self.window.configuration.save()
         units.enable(stick.uuid)
         self.window.reload(select=stick.uuid)
-        self.window.toast(f"{stick.name} added. Plug it in any time to back up.")
+        if existing:
+            self.window.toast(f"{stick.name} added. It already held a backup, which carries on from here.")
+        else:
+            self.window.toast(f"{stick.name} added. Plug it in any time to back up.")
         self.close()
 
 
@@ -546,8 +549,11 @@ class Window(Adw.ApplicationWindow):
         return plugged, running
 
     def tick(self) -> bool:
+        edited_elsewhere = self.configuration.changed_on_disk()
+        if edited_elsewhere:
+            self.configuration.load()
         signature = self.plugged_signature()
-        if signature != self.signature:
+        if edited_elsewhere or signature != self.signature:
             selected = self.selected_uuid()
             self.reload(select=selected)
         elif self.stack.get_visible_child_name() == "stick":

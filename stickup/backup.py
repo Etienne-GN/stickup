@@ -217,12 +217,25 @@ def _disk_usage(mountpoint: Path) -> dict:
     return {"stick_total": usage.total, "stick_used": usage.used, "stick_free": usage.free}
 
 
-def enroll(stick: config.Stick, passphrase: str | None) -> None:
-    """Create the repository if the stick has none, and remember the passphrase."""
+def enroll(stick: config.Stick, passphrase: str | None) -> bool:
+    """Create the repository if the stick has none, and remember the passphrase.
+
+    Returns True when the stick already held a backup; the stick then takes over the
+    folders and exclusions of its latest snapshot, so the same series continues.
+    """
     if passphrase:
         devices.store_passphrase(stick.uuid, stick.name, passphrase)
     if not devices.has_passphrase(stick.uuid):
         raise RuntimeError("no passphrase stored for this stick")
+    try:
+        return _enroll_stored(stick)
+    except Exception:
+        if passphrase:
+            devices.clear_passphrase(stick.uuid)
+        raise
+
+
+def _enroll_stored(stick: config.Stick) -> bool:
     with stick_lock(stick.uuid), mounted_repository(stick) as (repository, mountpoint):
         probe = mountpoint / f".stickup-write-test-{secrets.token_hex(8)}"
         try:
@@ -235,12 +248,18 @@ def enroll(stick: config.Stick, passphrase: str | None) -> None:
         if repository.exists():
             if not repository.opens():
                 raise ResticError("this stick already holds a backup and the passphrase does not open it")
-        elif repository.path.exists() and any(repository.path.iterdir()):
+            snapshots = repository.snapshots()
+            if snapshots:
+                latest = snapshots[-1]
+                stick.sources = list(latest["paths"])
+                stick.excludes = list(latest.get("excludes") or stick.excludes)
+            return True
+        if repository.path.exists() and any(repository.path.iterdir()):
             raise RuntimeError(
                 f"{repository.path} already holds files that are not a backup; empty or remove that folder first"
             )
-        else:
-            repository.init()
+        repository.init()
+        return False
 
 
 def list_snapshots(stick: config.Stick) -> list[dict]:

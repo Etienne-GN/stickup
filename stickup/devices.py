@@ -121,6 +121,10 @@ def has_passphrase(uuid: str) -> bool:
     return result.returncode == 0 and bool(result.stdout)
 
 
+def clear_passphrase(uuid: str) -> None:
+    run(["secret-tool", "clear", *keyring_attributes(uuid)])
+
+
 def store_passphrase(uuid: str, name: str, passphrase: str) -> None:
     run(
         ["secret-tool", "store", f"--label=stickup backup: {name}", *keyring_attributes(uuid)],

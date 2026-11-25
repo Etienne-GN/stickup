@@ -70,12 +70,12 @@ def command_add(arguments, configuration) -> int:
                 return 1
         else:
             passphrase = sys.stdin.readline().rstrip("\n")
-    backup.enroll(stick, passphrase)
+    existing = backup.enroll(stick, passphrase)
     configuration.sticks[stick.uuid] = stick
     configuration.save()
     if stick.auto:
         units.enable(stick.uuid)
-    print(f"enrolled {stick.name}")
+    print(f"enrolled {stick.name}" + (", continuing the backup already on it" if existing else ""))
     return 0
 
 

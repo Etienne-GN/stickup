@@ -62,8 +62,18 @@ class Config:
         self.sticks: dict[str, Stick] = {}
         self.load()
 
+    def _stamp(self) -> int | None:
+        try:
+            return self.path.stat().st_mtime_ns
+        except FileNotFoundError:
+            return None
+
+    def changed_on_disk(self) -> bool:
+        return self._stamp() != self.loaded_stamp
+
     def load(self) -> None:
         self.sticks = {}
+        self.loaded_stamp = self._stamp()
         if not self.path.exists():
             return
         data = yaml.safe_load(self.path.read_text()) or {}
@@ -80,6 +90,7 @@ class Config:
         temporary = self.path.with_suffix(".yaml.tmp")
         temporary.write_text(yaml.safe_dump({"sticks": sticks}, sort_keys=False))
         temporary.replace(self.path)
+        self.loaded_stamp = self._stamp()
 
     def get(self, uuid: str) -> Stick:
         try:
