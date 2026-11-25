@@ -251,8 +251,8 @@ def _enroll_stored(stick: config.Stick) -> bool:
             snapshots = repository.snapshots()
             if snapshots:
                 latest = snapshots[-1]
-                stick.sources = list(latest["paths"])
-                stick.excludes = list(latest.get("excludes") or stick.excludes)
+                stick.sources = _plain_paths(latest.get("paths")) or stick.sources
+                stick.excludes = _plain_paths(latest.get("excludes")) or stick.excludes
             return True
         if repository.path.exists() and any(repository.path.iterdir()):
             raise RuntimeError(
@@ -260,6 +260,15 @@ def _enroll_stored(stick: config.Stick) -> bool:
             )
         repository.init()
         return False
+
+
+def _plain_paths(candidates) -> list[str]:
+    """Keep only normalised absolute paths from snapshot metadata, which the stick supplies."""
+    kept = []
+    for candidate in candidates or []:
+        if isinstance(candidate, str) and os.path.isabs(candidate) and os.path.normpath(candidate) == candidate:
+            kept.append(candidate)
+    return kept
 
 
 def list_snapshots(stick: config.Stick) -> list[dict]:

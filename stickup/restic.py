@@ -68,7 +68,7 @@ class Repository:
         self.run("check", "--with-cache")
 
     def restore(self, snapshot: str, include: str, target: str) -> None:
-        self.run("restore", snapshot, "--target", target, "--include", include)
+        self.run("restore", "--target", target, "--include", include, "--", snapshot)
 
     def backup(
         self,
@@ -83,7 +83,7 @@ class Repository:
             command.append("--exclude-caches")
         for pattern in excludes:
             command += ["--exclude", pattern]
-        command += sources
+        command += ["--", *sources]
 
         summary: dict = {}
         unreadable: list[str] = []

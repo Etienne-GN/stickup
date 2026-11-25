@@ -210,6 +210,13 @@ class EngineTest(unittest.TestCase):
         self.assertEqual(newcomer.sources, [str(self.source)])
         self.assertEqual(newcomer.excludes, [str(self.source / "skip")])
 
+    def test_only_plain_absolute_paths_are_adopted_from_a_snapshot(self):
+        self.assertEqual(
+            backup._plain_paths(["/home/me", "--password-file=/x", "relative", "/a/../etc", "/usr/local", 7]),
+            ["/home/me", "/usr/local"],
+        )
+        self.assertEqual(backup._plain_paths(None), [])
+
     def test_wrong_passphrase_at_enrollment_is_not_left_in_the_keyring(self):
         with mock.patch.object(devices, "password_command", return_value="echo wrong"), \
                 mock.patch.object(devices, "store_passphrase") as store, \
