@@ -9,6 +9,7 @@ from pathlib import Path
 from . import devices
 
 UNREADABLE_FILES_EXIT = 3
+PATTERN_CHARACTERS = "\\*?["
 
 
 class ResticError(RuntimeError):
@@ -67,8 +68,18 @@ class Repository:
     def check(self) -> None:
         self.run("check", "--with-cache")
 
+    def ls(self, snapshot: str, directory: str) -> list[dict]:
+        """List what a folder of a snapshot holds, folders first."""
+        entries = []
+        for line in self.run("ls", "--json", "--", snapshot, directory).splitlines():
+            entry = json.loads(line)
+            if entry.get("struct_type") == "node" and entry.get("path") != directory:
+                entries.append(entry)
+        entries.sort(key=lambda entry: (entry.get("type") != "dir", str(entry.get("name", "")).casefold()))
+        return entries
+
     def restore(self, snapshot: str, include: str, target: str) -> None:
-        self.run("restore", "--target", target, "--include", include, "--", snapshot)
+        self.run("restore", "--target", target, "--include", literal_pattern(include), "--", snapshot)
 
     def backup(
         self,
@@ -106,6 +117,11 @@ class Repository:
         if code not in (0, UNREADABLE_FILES_EXIT):
             raise ResticError("\n".join(plain[-5:]) or f"restic backup exited {code}")
         return summary, unreadable
+
+
+def literal_pattern(path: str) -> str:
+    """Escape a path so restic matches it as written rather than as a pattern."""
+    return "".join("\\" + character if character in PATTERN_CHARACTERS else character for character in path)
 
 
 def _events(stream, plain: list[str]) -> Iterator[dict]:

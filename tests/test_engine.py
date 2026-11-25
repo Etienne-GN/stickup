@@ -191,6 +191,25 @@ class EngineTest(unittest.TestCase):
         self.assertEqual((restored / "keep" / "note.txt").read_text(), "hello")
         self.assertFalse((restored / "skip").exists())
 
+    def test_browsing_a_snapshot_lists_folders_first(self):
+        (self.source / "keep" / "inner").mkdir()
+        (self.source / "keep" / "Album.txt").write_text("a")
+        backup.run_backup(self.stick, notifications=False)
+        entries = backup.list_directory(self.stick, "latest", str(self.source / "keep"))
+        self.assertEqual([entry["name"] for entry in entries], ["inner", "Album.txt", "note.txt"])
+        self.assertEqual([entry["type"] for entry in entries], ["dir", "file", "file"])
+        self.assertEqual(entries[2]["path"], str(self.source / "keep" / "note.txt"))
+
+    def test_restoring_a_name_with_pattern_characters_takes_only_that_file(self):
+        (self.source / "keep" / "mix [1]*.txt").write_text("odd")
+        (self.source / "keep" / "mix 1x.txt").write_text("other")
+        backup.run_backup(self.stick, notifications=False)
+        target = Path(self.directory.name) / "restored"
+        backup.restore(self.stick, str(self.source / "keep" / "mix [1]*.txt"), str(target))
+        restored = target / str(self.source).lstrip("/") / "keep"
+        self.assertEqual(sorted(path.name for path in restored.iterdir()), ["mix [1]*.txt"])
+        self.assertEqual((restored / "mix [1]*.txt").read_text(), "odd")
+
     def test_stick_is_released_after_a_backup_even_if_the_desktop_mounted_it(self):
         self.unmount.reset_mock()
         result = backup.run_backup(self.stick, notifications=False)

@@ -8,7 +8,7 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, Gdk, Gio, GLib, Gtk  # noqa: E402
+from gi.repository import Adw, Gdk, Gio, GLib, Gtk, Pango  # noqa: E402
 
 from . import backup, config, devices, units  # noqa: E402
 
@@ -419,56 +419,149 @@ class PassphraseDialog(Adw.Dialog):
         in_thread(lambda: backup.passphrase_opens(self.stick, typed), self.checked)
 
     def checked(self, opens, error) -> None:
-        self.button.set_sensitive(True)
-        for name in ("success", "error"):
-            self.result.remove_css_class(name)
         if error:
-            self.result.set_label(describe(error))
-            self.result.add_css_class("error")
+            heading, body = "Could not check the passphrase", describe(error)
         elif opens:
-            self.result.set_label("Correct. This passphrase opens the backup.")
-            self.result.add_css_class("success")
+            heading, body = "Passphrase correct", f"This passphrase opens the backup on {self.stick.name}."
         else:
-            self.result.set_label("That is not the passphrase for this stick.")
-            self.result.add_css_class("error")
+            heading, body = "Wrong passphrase", f"That is not the passphrase for {self.stick.name}."
+        self.close()
+        alert = Adw.AlertDialog(heading=heading, body=body)
+        alert.add_response("ok", "OK")
+        alert.present(self.window)
 
 
 class RestoreDialog(Adw.Dialog):
     def __init__(self, window: "Window", stick: config.Stick):
-        super().__init__(title="Restore", content_width=480)
+        super().__init__(title="Restore", content_width=560, content_height=680)
         self.window = window
         self.stick = stick
         self.snapshots: list[dict] = []
         self.target: str | None = None
+        self.directory = "/"
+        self.busy = True
 
         self.snapshot_row = Adw.ComboRow(title="From the backup of", model=Gtk.StringList.new(["Reading the stick…"]))
-        self.path_row = Adw.EntryRow(title="File or folder to bring back", text=stick.expanded_sources()[0] if stick.sources else "")
+        self.snapshot_row.connect("notify::selected", self.snapshot_changed)
+        snapshot_group = Adw.PreferencesGroup()
+        snapshot_group.add(self.snapshot_row)
+
+        self.up_button = Gtk.Button(icon_name="go-up-symbolic", tooltip_text="Parent folder", css_classes=["flat"])
+        self.up_button.connect("clicked", lambda _b: self.load(self.directory.rsplit("/", 1)[0] or "/"))
+        self.location = Gtk.Label(xalign=0, hexpand=True, ellipsize=Pango.EllipsizeMode.START, css_classes=["heading"])
+        self.spinner = Gtk.Spinner()
+        location_bar = Gtk.Box(spacing=6)
+        for widget in (self.up_button, self.location, self.spinner):
+            location_bar.append(widget)
+
+        self.entries = Gtk.ListBox(selection_mode=Gtk.SelectionMode.SINGLE, activate_on_single_click=False)
+        self.entries.connect("row-selected", lambda *_a: self.update_button())
+        self.entries.connect("row-activated", self.entry_activated)
+        scroller = Gtk.ScrolledWindow(child=self.entries, vexpand=True, min_content_height=260, css_classes=["card"])
+        scroller.set_overflow(Gtk.Overflow.HIDDEN)
+        hint = Gtk.Label(
+            label="Click a file or folder to select it. Double-click a folder to open it.",
+            xalign=0,
+            wrap=True,
+            css_classes=["dim-label", "caption"],
+        )
+
         self.target_row = Adw.ActionRow(title="Put the copy in", subtitle="Choose a folder", activatable=True)
         self.target_row.add_suffix(Gtk.Image(icon_name="folder-open-symbolic"))
         self.target_row.connect("activated", self.choose_target)
-        group = Adw.PreferencesGroup(description="Nothing is overwritten in place: the copy lands inside the folder you choose, under its original path.")
-        for row in (self.snapshot_row, self.path_row, self.target_row):
-            group.add(row)
+        target_group = Adw.PreferencesGroup(description="Nothing is overwritten in place: the copy lands inside the folder you choose, under its original path.")
+        target_group.add(self.target_row)
 
         self.status = Gtk.Label(wrap=True, xalign=0, visible=False)
         self.button = Gtk.Button(label="Restore", css_classes=["suggested-action", "pill"], halign=Gtk.Align.CENTER, sensitive=False)
         self.button.connect("clicked", self.restore)
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=18, margin_top=12, margin_bottom=24, margin_start=18, margin_end=18)
-        for widget in (group, self.status, self.button):
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12, margin_top=12, margin_bottom=24, margin_start=18, margin_end=18)
+        for widget in (snapshot_group, location_bar, scroller, hint, target_group, self.status, self.button):
             box.append(widget)
         view = Adw.ToolbarView(content=box)
         view.add_top_bar(Adw.HeaderBar())
         self.set_child(view)
-        in_thread(lambda: backup.list_snapshots(stick), self.snapshots_loaded)
+        self.connect("closed", self.closed)
+        self.set_busy(True)
+        in_thread(lambda: backup.list_snapshots(stick, keep_mounted=True), self.snapshots_loaded)
+
+    def closed(self, _dialog) -> None:
+        in_thread(lambda: backup.release(self.stick), lambda _unmounted, _error: False)
+
+    def set_busy(self, busy: bool) -> None:
+        self.busy = busy
+        self.spinner.set_spinning(busy)
+        for widget in (self.entries, self.snapshot_row):
+            widget.set_sensitive(not busy)
+        self.up_button.set_sensitive(not busy and self.directory != "/")
+        self.update_button()
 
     def snapshots_loaded(self, snapshots, error) -> None:
         if error:
+            self.spinner.set_spinning(False)
             self.say(describe(error), "error")
             return
         self.snapshots = list(reversed(snapshots))
         labels = [snapshot["time"][:16].replace("T", "  ") for snapshot in self.snapshots]
         self.snapshot_row.set_model(Gtk.StringList.new(labels or ["No backup on this stick yet"]))
-        self.update_button()
+        if not self.snapshots:
+            self.spinner.set_spinning(False)
+            return
+        home = GLib.get_home_dir()
+        self.load(home if home in self.snapshots[0].get("paths", []) else "/")
+
+    def snapshot_changed(self, *_arguments) -> None:
+        if self.snapshots and not self.busy:
+            self.load(self.directory)
+
+    def selected_snapshot(self) -> str:
+        return self.snapshots[self.snapshot_row.get_selected()]["short_id"]
+
+    def load(self, directory: str) -> None:
+        snapshot = self.selected_snapshot()
+        self.set_busy(True)
+        in_thread(
+            lambda: backup.list_directory(self.stick, snapshot, directory),
+            lambda entries, error: self.listed(directory, entries, error),
+        )
+
+    def listed(self, directory: str, entries, error) -> None:
+        if error:
+            self.set_busy(False)
+            self.say(describe(error), "error")
+            return
+        self.directory = directory
+        self.location.set_label(directory)
+        self.status.set_visible(False)
+        self.entries.remove_all()
+        for entry in entries:
+            self.entries.append(self.entry_row(entry))
+        if not entries:
+            self.entries.append(Gtk.ListBoxRow(child=Gtk.Label(label="Empty folder", margin_top=12, margin_bottom=12), sensitive=False))
+        self.set_busy(False)
+
+    def entry_row(self, entry: dict) -> Gtk.ListBoxRow:
+        is_folder = entry.get("type") == "dir"
+        line = Gtk.Box(spacing=12, margin_top=8, margin_bottom=8, margin_start=12, margin_end=12)
+        line.append(Gtk.Image(icon_name="folder-symbolic" if is_folder else "text-x-generic-symbolic"))
+        line.append(Gtk.Label(label=str(entry.get("name", "")), xalign=0, hexpand=True, ellipsize=Pango.EllipsizeMode.MIDDLE))
+        if is_folder:
+            line.append(Gtk.Image(icon_name="go-next-symbolic", css_classes=["dim-label"]))
+        else:
+            line.append(Gtk.Label(label=human_bytes(entry.get("size")), css_classes=["dim-label", "caption"]))
+        row = Gtk.ListBoxRow(child=line)
+        row.entry = entry
+        return row
+
+    def entry_activated(self, _list, row) -> None:
+        entry = getattr(row, "entry", None)
+        if entry and entry.get("type") == "dir" and not self.busy:
+            self.load(entry["path"])
+
+    def chosen_path(self) -> str:
+        row = self.entries.get_selected_row()
+        entry = getattr(row, "entry", None)
+        return entry["path"] if entry else self.directory
 
     def choose_target(self, _row) -> None:
         Gtk.FileDialog(title="Put the copy in").select_folder(self.window, None, self.target_chosen)
@@ -482,7 +575,10 @@ class RestoreDialog(Adw.Dialog):
         self.update_button()
 
     def update_button(self) -> None:
-        self.button.set_sensitive(bool(self.snapshots and self.target and self.path_row.get_text().strip()))
+        chosen = self.chosen_path()
+        name = chosen.rsplit("/", 1)[1] or "everything"
+        self.button.set_label(f"Restore {name}" if self.snapshots else "Restore")
+        self.button.set_sensitive(bool(self.snapshots and self.target and not self.busy))
 
     def say(self, text: str, kind: str | None = None) -> None:
         for name in ("success", "error"):
@@ -493,14 +589,16 @@ class RestoreDialog(Adw.Dialog):
         self.status.set_visible(True)
 
     def restore(self, _button) -> None:
-        snapshot = self.snapshots[self.snapshot_row.get_selected()]["short_id"]
-        path, target = self.path_row.get_text().strip(), self.target
-        self.button.set_sensitive(False)
+        snapshot, path, target = self.selected_snapshot(), self.chosen_path(), self.target
+        self.set_busy(True)
         self.say("Restoring…")
-        in_thread(lambda: backup.restore(self.stick, path, target, snapshot), lambda _r, error: self.restored(path, target, error))
+        in_thread(
+            lambda: backup.restore(self.stick, path, target, snapshot, keep_mounted=True),
+            lambda _r, error: self.restored(path, target, error),
+        )
 
     def restored(self, path: str, target: str, error) -> None:
-        self.button.set_sensitive(True)
+        self.set_busy(False)
         if error:
             self.say(describe(error), "error")
         else:

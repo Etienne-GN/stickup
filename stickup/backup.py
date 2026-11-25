@@ -25,12 +25,12 @@ class Busy(RuntimeError):
 
 
 @contextmanager
-def stick_lock(uuid: str):
+def stick_lock(uuid: str, wait: bool = False):
     directory = config.runtime_dir()
     directory.mkdir(parents=True, exist_ok=True)
     with open(directory / f"{uuid}.lock", "w") as handle:
         try:
-            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            fcntl.flock(handle, fcntl.LOCK_EX if wait else fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             raise Busy("another operation is using this stick") from None
         yield
@@ -271,13 +271,27 @@ def _plain_paths(candidates) -> list[str]:
     return kept
 
 
-def list_snapshots(stick: config.Stick) -> list[dict]:
-    with stick_lock(stick.uuid), mounted_repository(stick) as (repository, _):
+def list_snapshots(stick: config.Stick, keep_mounted: bool = False) -> list[dict]:
+    with stick_lock(stick.uuid), mounted_repository(stick, keep_mounted) as (repository, _):
         return repository.snapshots()
 
 
-def restore(stick: config.Stick, include: str, target: str, snapshot: str = "latest") -> None:
-    with stick_lock(stick.uuid), mounted_repository(stick) as (repository, _):
+def list_directory(stick: config.Stick, snapshot: str, directory: str) -> list[dict]:
+    """Browse a snapshot; the stick stays mounted, call release() when done browsing."""
+    with stick_lock(stick.uuid), mounted_repository(stick, keep_mounted=True) as (repository, _):
+        return repository.ls(snapshot, directory)
+
+
+def release(stick: config.Stick) -> bool:
+    """Unmount the stick once whatever is using it has finished."""
+    with stick_lock(stick.uuid, wait=True):
+        return _release(stick)
+
+
+def restore(
+    stick: config.Stick, include: str, target: str, snapshot: str = "latest", keep_mounted: bool = False
+) -> None:
+    with stick_lock(stick.uuid), mounted_repository(stick, keep_mounted) as (repository, _):
         repository.restore(snapshot, include, target)
 
 
