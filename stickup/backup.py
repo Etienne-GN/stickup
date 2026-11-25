@@ -129,18 +129,27 @@ def run_backup(stick: config.Stick, notifications: bool = True, quiet_seconds: i
         log.info("%s, skipping this run", error)
         return {"status": "skipped", "reason": str(error)}
 
+    result["unmounted"] = _release(stick)
     result["duration_seconds"] = round(time.monotonic() - started)
     config.write_last_run(stick.uuid, result)
+    took = f"Took {human_duration(result['duration_seconds'])}."
+    unplug = "Safe to unplug." if result["unmounted"] else "The stick is still in use: eject it before unplugging."
     if result["status"] == "ok":
-        notifier.send("backup done", f"Took {human_duration(result['duration_seconds'])}. Safe to unplug.")
+        notifier.send("backup done", f"{took} {unplug}")
     elif result["status"] == "incomplete":
         count = len(result["unreadable"])
-        notifier.send(
-            "backup done, some files unreadable",
-            f"{count} could not be read. Took {human_duration(result['duration_seconds'])}. Safe to unplug.",
-            critical=True,
-        )
+        notifier.send("backup done, some files unreadable", f"{count} could not be read. {took} {unplug}", critical=True)
     return result
+
+
+def _release(stick: config.Stick) -> bool:
+    """Unmount the stick even if the desktop mounted it, so "safe to unplug" is true."""
+    try:
+        devices.unmount(stick.uuid)
+    except subprocess.CalledProcessError as error:
+        log.warning("could not unmount the stick: %s", _describe(error))
+        return False
+    return True
 
 
 def _describe(error: Exception) -> str:

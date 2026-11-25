@@ -165,6 +165,8 @@ class EngineTest(unittest.TestCase):
             mock.patch.object(devices, "password_command", return_value="echo right-passphrase"),
             mock.patch.object(devices, "has_passphrase", return_value=True),
         ]
+        self.unmount = mock.patch.object(devices, "unmount").start()
+        self.addCleanup(mock.patch.stopall)
         for patch in patches:
             patch.start()
             self.addCleanup(patch.stop)
@@ -188,6 +190,18 @@ class EngineTest(unittest.TestCase):
         restored = target / str(self.source).lstrip("/")
         self.assertEqual((restored / "keep" / "note.txt").read_text(), "hello")
         self.assertFalse((restored / "skip").exists())
+
+    def test_stick_is_released_after_a_backup_even_if_the_desktop_mounted_it(self):
+        self.unmount.reset_mock()
+        result = backup.run_backup(self.stick, notifications=False)
+        self.unmount.assert_called_once_with(UUID)
+        self.assertTrue(result["unmounted"])
+
+    def test_busy_stick_is_reported_as_still_in_use(self):
+        self.unmount.side_effect = subprocess.CalledProcessError(1, "udisksctl", stderr="target is busy")
+        result = backup.run_backup(self.stick, notifications=False)
+        self.assertEqual(result["status"], "ok")
+        self.assertFalse(result["unmounted"])
 
     def test_retention_keeps_only_the_newest(self):
         for round_number in range(3):

@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=stickup
+GenericName=USB Backup
+Comment=Back up to a USB stick by plugging it in
+Exec=@BINDIR@/stickup
+Icon=drive-removable-media
+Terminal=false
+Categories=Utility;Archiving;GTK;
+Keywords=backup;usb;restic;restore;
+StartupNotify=true

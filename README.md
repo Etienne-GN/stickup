@@ -14,18 +14,27 @@ Debian or a derivative, with a GNOME session:
 sudo apt install restic libsecret-tools python3-gi gir1.2-adw-1 python3-yaml udisks2 libnotify-bin
 ```
 
+## Install
+
+```
+make install      # command in ~/.local/bin, entry in the applications menu
+make uninstall
+```
+
+The install links back to this checkout, so keep the folder where it is.
+
 ## Use
 
 ```
-bin/stickup                 # open the window
-bin/stickup devices         # list plugged-in USB filesystems
-bin/stickup add <uuid>      # enroll a stick
-bin/stickup status
-bin/stickup backup <uuid>
-bin/stickup snapshots <uuid>
-bin/stickup restore <uuid> <path> <target-dir>
-bin/stickup check-passphrase <uuid>
-bin/stickup remove <uuid>
+stickup                 # open the window
+stickup devices         # list plugged-in USB filesystems
+stickup add <uuid>      # enroll a stick
+stickup status
+stickup backup <uuid>
+stickup snapshots <uuid>
+stickup restore <uuid> <path> <target-dir>
+stickup check-passphrase <uuid>
+stickup remove <uuid>
 ```
 
 The stick must already be formatted and writable by you. Anything already on it is kept;
